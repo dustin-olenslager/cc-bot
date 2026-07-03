@@ -1,7 +1,8 @@
 import { getMode, getModel } from './state.mjs';
+import { MODEL_LABELS } from './models.mjs';
 
 export const MODES = ['strict', 'guided', 'yolo'];
-export const MODELS = ['haiku', 'sonnet', 'opus'];
+export const MODELS = MODEL_LABELS;
 
 export const MODE_LABELS = {
   strict: '🔒 Strict',
