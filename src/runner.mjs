@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { TLDR_INSTRUCTION, splitTldr, costFooter } from './tldr.mjs';
 import { ASK_INSTRUCTION, CONTINUE_INSTRUCTION, parseAsk, stripAsk, detectYesNo, askKeyboard, nextAfterAnswer, hardStopAsk, runHardStopAsk, hasContinue, stripContinue } from './ask-flow.mjs';
 import { log } from './log.mjs';
+import { resolveModel } from './models.mjs';
 
 // Phalanx PreToolUse safety gates installed in the target container's ~/.claude.
 // Herald's `--settings` REPLACES the container's hook set, so unless we re-list these
@@ -82,7 +83,7 @@ export function makeRunner({ exec, state, tg, supervisor, keyboards, ensureHook,
 
   function runClaude(prompt, chatId, sk, threadId) {
     const sessionId = state.getSession(sk);
-    const model = state.getModel(sk);
+    const { id: modelId } = resolveModel(state.getModel(sk), prompt);
     const mode = state.getMode(sk);
     const cwd = state.getRepo(sk);
 
@@ -90,7 +91,7 @@ export function makeRunner({ exec, state, tg, supervisor, keyboards, ensureHook,
       const claudeArgs = [
         '-p',
         '--output-format', 'json',
-        '--model', model,
+        '--model', modelId,
         '--append-system-prompt', `${TLDR_INSTRUCTION}\n\n${ASK_INSTRUCTION}\n\n${CONTINUE_INSTRUCTION}`,
       ];
       if (sessionId) claudeArgs.push('--resume', sessionId);
