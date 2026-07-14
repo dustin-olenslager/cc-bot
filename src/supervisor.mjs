@@ -32,7 +32,21 @@ export function makeSupervisor({ exec, state, tg, deps }) {
   async function maybeEscalate(chatId, sk, threadId, reason, defaultKeyboard) {
     if (!AUTO_ESCALATE) return false;
     const cwd = state.getRepo(sk);
-    if (!(await exec.repoHasOpenTasks(cwd))) return false;
+    // No open "- [ ]" tasks: the current unit finished. Before concluding "done",
+    // check for remaining OPERATOR-GATED work (un-merged task/* branch, unapplied
+    // migration). If gated, park LOUDLY: write BLOCKED: to PROGRESS.md + tell the
+    // operator exactly what to do — never silently stop, never cross the gate.
+    if (!(await exec.repoHasOpenTasks(cwd))) {
+      const gated = await exec.gatedWorkReason(cwd);
+      if (!gated) return false; // genuinely nothing left
+      await exec.writeBlockedPark(cwd, `needs operator: ${gated}`);
+      await tg.sendChunked(chatId,
+        `⏸️ Unit finished, but forward work is parked at an operator gate — ${gated}. ` +
+        `Wrote BLOCKED to PROGRESS.md. Merge the branch / apply the migration (or drop ` +
+        `.phalanx-automerge) to let the loop continue.`,
+        { markup: defaultKeyboard(sk), threadId }).catch(() => {});
+      return true;
+    }
     try { await launchSupervisor(cwd, chatId, threadId); }
     catch (e) {
       log.error({ chatId, cwd, reason, err: String(e?.message || e), msg: 'launchSupervisor failed' });

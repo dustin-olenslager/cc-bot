@@ -56,6 +56,43 @@ export function makeContainerExec({ container, user }) {
     } catch { return false; }
   }
 
+  // Inspect remaining OPERATOR-GATED work when TASKS.md has 0 open "- [ ]" items.
+  // Returns a short human reason string if forward work exists but is parked behind
+  // an operator gate (un-merged task/* branch, or unapplied drizzle/prisma/alembic
+  // migration), else "". This lets maybeEscalate distinguish "truly done" from
+  // "done this unit, parked at a gate" WITHOUT ever crossing the gate itself.
+  async function gatedWorkReason(cwd) {
+    const script =
+      'set -e; cd "$1" 2>/dev/null || exit 0; ' +
+      // un-merged task/* or fix/* branches (work committed, awaiting operator merge)
+      'br="$(git for-each-ref --format="%(refname:short)" refs/heads/task refs/heads/fix 2>/dev/null ' +
+      '| while read b; do [ -n "$b" ] && ! git merge-base --is-ancestor "$b" main 2>/dev/null && echo "$b"; done)"; ' +
+      // migration files present but repo lacks the automerge opt-in (prod-DB gate)
+      'mig="$(ls drizzle/*.sql prisma/migrations/* alembic/versions/*.py 2>/dev/null | head -1)"; ' +
+      'if [ -n "$br" ]; then echo "unmerged branch(es): $(echo $br | tr "\n" " ")"; ' +
+      'elif [ -n "$mig" ] && [ ! -f .phalanx-automerge ]; then echo "unapplied migration + no .phalanx-automerge"; fi';
+    try {
+      const { stdout } = await execFileP('docker', ['exec', '-u', user, container,
+        'bash', '-c', script, '_', cwd]);
+      return stdout.trim();
+    } catch { return ''; }
+  }
+
+  // Idempotently append a "BLOCKED: <reason>" line to cwd/PROGRESS.md so the loop
+  // halts loudly (not silently) and the operator gets an actionable park message.
+  // No-op if a BLOCKED line is already present.
+  async function writeBlockedPark(cwd, reason) {
+    const script =
+      'cd "$1" || exit 1; touch PROGRESS.md; ' +
+      'grep -qi "^BLOCKED:" PROGRESS.md && exit 0; ' +
+      'printf "\nBLOCKED: %s\n" "$2" >> PROGRESS.md';
+    try {
+      await execFileP('docker', ['exec', '-u', user, container,
+        'bash', '-c', script, '_', cwd, reason]);
+      return true;
+    } catch { return false; }
+  }
+
   // True if `dir` is an existing directory in the target container. `dir` is passed
   // as an argv element (never interpolated into the shell) so a hostile path can't
   // break out of the `test -d` check.
@@ -81,5 +118,5 @@ export function makeContainerExec({ container, user }) {
     } catch { return []; }
   }
 
-  return { container, user, copyFileToContainer, copyAndChmod, sendTmuxKeys, repoHasOpenTasks, repoIsBlocked, dirExists, listRepoCandidates, execFileP };
+  return { container, user, copyFileToContainer, copyAndChmod, sendTmuxKeys, repoHasOpenTasks, repoIsBlocked, gatedWorkReason, writeBlockedPark, dirExists, listRepoCandidates, execFileP };
 }
