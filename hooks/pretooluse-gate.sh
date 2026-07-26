@@ -34,24 +34,10 @@ else
   SESSION=""
 fi
 
-# Headless git-write allowlist ---------------------------------------------
-# In a headless bot run (HOME=/home/cc) or a Phalanx one-shot (PHALANX_ONESHOT=1)
-# nobody can tap an approval keyboard, so a gated git write (push/tag/merge/
-# checkout) hangs until the approval timeout and then fails closed. Those four
-# are always safe on a task branch, so auto-approve them ONLY when headless —
-# still logged, and herald stays fully on for everything else and for
-# interactive sessions.
-if [ "${HOME:-}" = "/home/cc" ] || [ "${PHALANX_ONESHOT:-}" = "1" ]; then
-  if [ "$TOOL" = "Bash" ] && \
-     printf '%s' "$CMD" | grep -qE '(^|[[:space:]]|;|&&|\|\|)git[[:space:]]+(push|tag|merge|checkout)([[:space:]]|$)'; then
-    TS=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')
-    printf '%s headless-allow %s: %s\n' "$TS" "$TOOL" "$CMD" \
-      >> "${HERALD_GATE_LOG:-/tmp/herald-gate.log}" 2>/dev/null || true
-    exit 0
-  fi
-fi
-
 # Decide if this tool call needs approval ----------------------------------
+# The denylist runs FIRST and unconditionally, before any allowlist can
+# apply, so nothing flagged here can later be masked by an allowlist match
+# elsewhere in the same command string.
 
 needs_approval=0
 
@@ -84,6 +70,33 @@ case "$TOOL" in
     if [ "$MODE" = "strict" ]; then needs_approval=1; fi
     ;;
 esac
+
+# Headless git-write allowlist ---------------------------------------------
+# In a headless bot run (HOME=/home/cc) or a Phalanx one-shot (PHALANX_ONESHOT=1)
+# nobody can tap an approval keyboard, so a gated git write (push/tag/merge/
+# checkout) hangs until the approval timeout and then fails closed. Those four
+# are always safe on a task branch, so auto-approve them ONLY when headless —
+# still logged, and herald stays fully on for everything else and for
+# interactive sessions.
+#
+# Runs AFTER the denylist above and can only CLEAR a flag the denylist set
+# for the git-write pattern itself — it never suppresses a flag raised for
+# anything else, because the match below requires the ENTIRE trimmed command
+# to be nothing but the safe git invocation (no substring match). A compound
+# command like `rm -rf /workspace ; git push` still has needs_approval=1 from
+# the rm -rf check above: the trimmed command contains `;`, so it is not
+# "just" git push/tag/merge/checkout and this block does not fire for it.
+if [ "${HOME:-}" = "/home/cc" ] || [ "${PHALANX_ONESHOT:-}" = "1" ]; then
+  if [ "$TOOL" = "Bash" ]; then
+    TRIMMED_CMD=$(printf '%s' "$CMD" | tr '\n\t\r' '   ' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+    if printf '%s' "$TRIMMED_CMD" | grep -qE '^git[[:space:]]+(push|tag|merge|checkout)([[:space:]][^;&|`$]*)?$'; then
+      TS=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo '?')
+      printf '%s headless-allow %s: %s\n' "$TS" "$TOOL" "$CMD" \
+        >> "${HERALD_GATE_LOG:-/tmp/herald-gate.log}" 2>/dev/null || true
+      needs_approval=0
+    fi
+  fi
+fi
 
 if [ "$needs_approval" -eq 0 ]; then exit 0; fi
 
