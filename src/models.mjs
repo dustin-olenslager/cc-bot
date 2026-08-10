@@ -1,7 +1,11 @@
+// Tier label -> `claude --model` argument. Use the stable ALIASES (opus/sonnet/haiku)
+// rather than pinned dated ids, so a Herald pass auto-tracks the latest model of that
+// tier and never ages a generation behind (the old map pinned claude-opus-4-8 /
+// claude-sonnet-4-6 and silently rotted). fable has no CLI alias -> explicit current id.
 export const MODEL_IDS = {
-  opus:   'claude-opus-4-8',
-  sonnet: 'claude-sonnet-4-6',
-  haiku:  'claude-haiku-4-5-20251001',
+  opus:   'opus',
+  sonnet: 'sonnet',
+  haiku:  'haiku',
   fable:  'claude-fable-5',
 };
 
